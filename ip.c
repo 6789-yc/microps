@@ -173,6 +173,28 @@ ip_iface_select(ip_addr_t addr)
 int
 ip_protocol_register(uint8_t type, void (*handler)(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface))
 {
+  struct ip_protocol *entry;
+
+  for (entry = protocols; entry; entry = entry->next) {
+    if (entry->type == type) {
+      errorf("already registered");
+      return -1;
+    }
+  }
+
+  entry = memory_alloc(sizeof(struct ip_protocol));
+  if (!entry) {
+    errorf("memory_alloc() failure");
+    return -1;
+  }
+
+  entry->type = type;
+  entry->handler = handler;
+  entry->next = protocols;
+  protocols = entry;
+
+  infof("registered, type=%u", entry->type);
+  return 0;
 }
 
 static void
@@ -235,6 +257,13 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
 	 hdr->protocol,
 	 total);
   ip_dump(data, total);
+
+  for (struct ip_protocol *entry = protocols; entry; entry = entry->next) {
+    if (entry->type == hdr->protocol){
+      entry->handler(data+hlen, total-hlen, hdr->src, hdr->dst, iface);
+      return;
+    }
+  }
 }
 
 static int
@@ -302,7 +331,6 @@ ssize_t
 ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst)
 {
   struct ip_iface *iface;
-  char addr[IP_ADDR_STR_LEN];
   uint16_t id;
 
   if (src == IP_ADDR_ANY) {
